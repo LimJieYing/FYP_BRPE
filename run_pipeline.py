@@ -2,11 +2,15 @@
 Edit COMMON_CONFIG here for project-wide paths used by multiple scripts.
 """
 import importlib
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(ROOT))
+
+# Force training mode
+os.environ["MODE"] = "train"
 
 from FYP_BRPE.common_config import COMMON
 
