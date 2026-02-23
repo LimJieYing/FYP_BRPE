@@ -1,13 +1,16 @@
+import os
 from pathlib import Path
 import random
 import pandas as pd
 import json
+from FYP_BRPE.common_config import COMMON, get_paths
 
-from FYP_BRPE.common_config import COMMON
+MODE = os.getenv("MODE", "train")
+PATHS = get_paths(MODE)
 
 ROOT = Path(__file__).parents[1]
-SYNTH_META = ROOT / COMMON["REVERB_DIR"] / "synthesis_metadata.csv"
-OUT_DIR = ROOT / COMMON["SPLIT_DIR"]
+SYNTH_META = ROOT / PATHS["REVERB_DIR"] / "synthesis_metadata.csv"
+OUT_DIR = ROOT / PATHS["SPLIT_DIR"]
 RATIOS = COMMON["SPLIT_RATIOS"]
 SEED = COMMON["SEED"]
 
@@ -22,8 +25,7 @@ def make_splits(rir_ids, ratios, seed=None):
     n_val = int(ratios[1] * n)
     train = set(ids[:n_train])
     val = set(ids[n_train : n_train + n_val])
-    test = set(ids[n_train + n_val :])
-    return {"train": train, "val": val, "test": test}
+    return {"train": train, "val": val}  # no internal test
 
 
 def build_splits(df, splits, out_dir):
