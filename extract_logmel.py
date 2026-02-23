@@ -4,12 +4,15 @@ import numpy as np
 import soundfile as sf
 import librosa
 from tqdm import tqdm
+import os
+from common_config import COMMON, get_paths
 
-from FYP_BRPE.common_config import COMMON
+MODE = os.getenv("MODE", "train")
+PATHS = get_paths(MODE)
 
 ROOT = Path(__file__).parents[1]
-REVERB_DIR = (ROOT / COMMON["REVERB_DIR"]).resolve()
-OUT_DIR = (ROOT / COMMON["FEATURE_DIR"]).resolve()
+REVERB_DIR = (ROOT / PATHS["REVERB_DIR"]).resolve()
+OUT_DIR = (ROOT / PATHS["FEATURE_DIR"]).resolve()
 SR = int(COMMON["SR"])
 N_FFT = int(COMMON["N_FFT"])
 HOP = int(COMMON["HOP"])
