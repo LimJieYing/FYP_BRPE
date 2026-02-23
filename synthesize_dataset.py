@@ -8,13 +8,18 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 from scipy.signal import fftconvolve
+import os
+from common_config import COMMON, get_paths
 
 from FYP_BRPE.common_config import COMMON
 
+MODE = os.getenv("MODE", "train")
+PATHS = get_paths(MODE)
+
 ROOT = Path(__file__).parents[1]
-SPEECH_DIR = ROOT / COMMON["SPEECH_DIR"]
+SPEECH_DIR = ROOT / PATHS["SPEECH_DIR"]
 RIR_DIR = ROOT / COMMON["RIR_DIR"]
-OUT_DIR = ROOT / COMMON["REVERB_DIR"]
+OUT_DIR = ROOT / PATHS["REVERB_DIR"]
 ADD_NOISE = bool(COMMON["ADD_NOISE"])
 SNR_MIN = float(COMMON["SNR_MIN"])
 SNR_MAX = float(COMMON["SNR_MAX"])
@@ -24,18 +29,22 @@ SEED = COMMON["SEED"]
 
 def load_rirs_metadata(rir_dir: Path):
     meta_path = rir_dir / "rirs_metadata.jsonl"
-    if meta_path.exists():
-        meta = []
-        with open(meta_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                meta.append(json.loads(line))
-        return meta
-    # fallback: list wav files only
-    files = sorted([p for p in rir_dir.iterdir() if p.suffix.lower() == ".wav"])
-    return [{"wav": p.name, "rt60": None, "room_dim": None, "fs": None} for p in files]
+    meta = []
+    with open(meta_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            meta.append(json.loads(line))
+    return meta
+
+def build_rir_map(rirs_meta):
+    """Map rir filename -> rt60 for labeling."""
+    return {Path(m["wav"]).name: m.get("rt60") for m in rirs_meta}
+
+def build_rir_meta_map(rirs_meta):
+    """Map rir filename -> full metadata dict."""
+    return {Path(m["wav"]).name: m for m in rirs_meta}
 
 def add_noise_at_snr(signal, snr_db):
     rms_signal = np.sqrt(np.mean(signal**2) + 1e-12)
@@ -83,6 +92,8 @@ def main():
     if not RIR_DIR.exists():
         raise RuntimeError(f"RIR directory not found: {RIR_DIR}")
     rirs_meta = load_rirs_metadata(RIR_DIR)
+    rir_map = build_rir_map(rirs_meta)
+    rir_meta_map = build_rir_meta_map(rirs_meta)
     rir_files = [RIR_DIR / m["wav"] for m in rirs_meta]
     if len(rir_files) == 0:
         raise RuntimeError(f"No RIR wavs found in {RIR_DIR}")
@@ -104,15 +115,18 @@ def main():
         out_base = (OUT_DIR / rel).with_suffix("")
         out_file = out_base.with_name(out_base.name + "_reverb.wav")
         convolve_and_save(sp, rir_choice, out_file, snr=snr)
-        meta = next((m for m in rirs_meta if Path(m["wav"]).name == Path(rir_choice).name), {})
+        rir_name = Path(rir_choice).name
+        rt60 = rir_map.get(rir_name)
+        meta = rir_meta_map.get(rir_name, {})
+        if rt60 is None:
+            raise RuntimeError(f"RT60 not found for RIR: {rir_name}")
 
-        # store resolved absolute paths so downstream code can reliably map paths
         rows.append({
             "speech": str(sp.resolve()),
             "rir": str(rir_choice.resolve()),
             "out": str(out_file.resolve()),
             "snr_db": snr,
-            "rt60": meta.get("rt60"),
+            "rt60": rt60,
             "room_dim": meta.get("room_dim"),
             "absorption_uniform": meta.get("absorption_uniform"),
             "fs": meta.get("fs")
