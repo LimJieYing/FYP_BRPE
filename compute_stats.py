@@ -4,14 +4,19 @@ import json
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
+import os
+from common_config import COMMON, get_paths
 
 from FYP_BRPE.common_config import COMMON
 
+MODE = os.getenv("MODE", "train")
+PATHS = get_paths(MODE)
+
 ROOT = Path(__file__).parents[1]
-FEATURE_ROOT = (ROOT / COMMON["FEATURE_DIR"]).resolve()
-REVERB_ROOT = (ROOT / COMMON["REVERB_DIR"]).resolve()
-SPLIT_CSV = (ROOT / COMMON["SPLIT_DIR"] / "train.csv").resolve()
-OUT_PATH = (ROOT / COMMON["STATS_JSON"]).resolve()
+FEATURE_ROOT = (ROOT / PATHS["FEATURE_DIR"]).resolve()
+REVERB_ROOT = (ROOT / PATHS["REVERB_DIR"]).resolve()
+SPLIT_CSV = (ROOT / PATHS["SPLIT_DIR"] / "train.csv").resolve()
+OUT_PATH = (ROOT / PATHS["STATS_JSON"]).resolve()
 BATCH = 1000
 
 
