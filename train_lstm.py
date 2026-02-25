@@ -2,6 +2,8 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.nn as nn
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from pathlib import Path
 from common_config import COMMON, get_paths
@@ -66,10 +68,9 @@ def main():
 
     batch_size = 32
     num_workers = 4
-    epochs = 40
+    epochs = 3 # CURRENTLY set to 3 for testing THE PLOT, og val = 25
     lr = 5e-4
     weight_decay = 1e-4
-    early_patience = 6
     grad_clip = 1.0
 
     train_loader = make_dataloader(train_csv, batch_size=batch_size, shuffle=True, num_workers=num_workers, mode="train")
@@ -84,11 +85,14 @@ def main():
     )
 
     best_val = float("inf")
-    patience = 0
+    train_history = [] #store train loss for epochs 
+    val_history = [] #store val loss for epochs
 
     for epoch in range(1, epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, task="regression", grad_clip=grad_clip)
+        train_history.append(train_loss)
         val_loss = evaluate(model, val_loader, device, task="regression")
+        val_history.append(val_loss)
         print(f"Epoch {epoch:03d} | train_loss={train_loss:.4f} | val_loss={val_loss:.4f}")
 
         scheduler.step(val_loss)
@@ -98,14 +102,20 @@ def main():
             patience = 0
             torch.save(model.state_dict(), "best_lstm_model.pth")
             print(f"Saved best model (val_loss={best_val:.4f})")
-        else:
-            patience += 1
-            if patience >= early_patience:
-                print(f"Early stopping at epoch {epoch}")
-                break
-
-    print("Done.")
-
+        
+    # plot graph for training 
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(8, 4))
+    sns.lineplot(x=range(1, epochs + 1), y=train_history, label="Train Loss")
+    sns.lineplot(x=range(1, epochs + 1), y=val_history, label="Val Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Training and Validation Loss Over Time")
+    plt.savefig("training_val_loss_plot.png")
+    plt.tight_layout()
+    plt.show()
+    print("Plot saved as 'training_val_loss_plot.png'.")
 
 if __name__ == "__main__":
     main()
