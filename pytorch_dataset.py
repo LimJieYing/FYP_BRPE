@@ -1,55 +1,62 @@
 """PyTorch Dataset/DataLoader for LSTM training.
 
-Returns variable-length sequences suitable for LSTM:
+Returns variable length full-file sequences  for LSTM training. a tuple (seq, label) where:
   - seq: Tensor shape (T, F) where T = n_frames (varies per file), F = n_mels
   - label: scalar RT60
 
-Uses pad_collate to batch variable-length sequences.
+TODO: complete this, test and refine
 """
 from pathlib import Path
 import json
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-
-from FYP_BRPE.common_config import COMMON
-
-ROOT = Path(__file__).parents[1]
-FEATURE_DIR = (ROOT / COMMON["FEATURE_DIR"]).resolve()
-REVERB_DIR = (ROOT / COMMON["REVERB_DIR"]).resolve()
-STATS_JSON = (ROOT / COMMON["STATS_JSON"]).resolve()
-
+import os
+from common_config import COMMON, get_paths
+import pandas as pd
 
 class PyTorchDataset(Dataset):
-    """Returns full-file sequences (variable length) for LSTM training."""
+    """"""
     
     def __init__(self, split_csv, mode="train"):
-        import pandas as pd
-        self.df = pd.read_csv(split_csv)
         self.mode = mode
-        
-        # load normalization stats
-        if not STATS_JSON.exists():
-            raise FileNotFoundError(f"Stats file not found: {STATS_JSON}. Run compute_stats.py first.")
-        stats = json.loads(STATS_JSON.read_text())
+        self.df = pd.read_csv(split_csv)
+
+        root = Path(__file__).parents[1]
+        if mode == "test":
+            resolved_mode = "eval"
+        elif mode in ("val", "train"):
+            resolved_mode = "train"
+        else:
+            resolved_mode = mode
+
+        paths = get_paths(os.getenv("MODE", resolved_mode))
+
+        self.feature_dir = (root / paths["FEATURE_DIR"]).resolve()
+        self.reverb_dir = (root / paths["REVERB_DIR"]).resolve()
+
+        # Force train stats for eval/test to avoid leakage
+        if resolved_mode == "eval":
+            self.stats_json = (root / get_paths("train")["STATS_JSON"]).resolve()
+        else:
+            self.stats_json = (root / paths["STATS_JSON"]).resolve()
+
+        if not self.stats_json.exists():
+            raise FileNotFoundError(f"Stats file not found: {self.stats_json}. Run compute_stats.py first.")
+        stats = json.loads(self.stats_json.read_text())
         self.mean = np.array(stats["mean"], dtype=np.float32)[:, None]   # (n_mels, 1)
         self.std = np.array(stats["std"], dtype=np.float32)[:, None]
         self.std[self.std == 0.0] = 1.0  # avoid division by zero
 
-    def _map_out_to_feature(self, out_wav_path):
-        """Map reverberant WAV path to corresponding .npy feature file."""
-        p = Path(out_wav_path).resolve()
+    def _map_out_to_feature(self, out_path):
+        p = Path(out_path).resolve()
         try:
-            rel = p.relative_to(REVERB_DIR)
+            rel = p.relative_to(self.reverb_dir)
         except ValueError:
             raise FileNotFoundError(
-                f"Output path {p} is not under REVERB_DIR {REVERB_DIR}. "
-                "Ensure synthesize_dataset writes absolute paths."
+                f"Output path {p} is not under REVERB_DIR {self.reverb_dir}."
             )
-        feat_path = (FEATURE_DIR / rel).with_suffix(".npy")
-        if not feat_path.exists():
-            raise FileNotFoundError(f"Feature file not found: {feat_path}")
-        return feat_path
+        return (self.feature_dir / rel).with_suffix(".npy")
 
     def __len__(self):
         return len(self.df)
@@ -121,20 +128,3 @@ def make_dataloader(split_csv, batch_size=16, shuffle=True, num_workers=2, mode=
         collate_fn=pad_collate,
         pin_memory=True
     )
-
-
-# Quick test when run directly
-if __name__ == "__main__":
-    train_csv = ROOT / COMMON["SPLIT_DIR"] / "train.csv"
-    if not train_csv.exists():
-        print(f"Train CSV not found: {train_csv}")
-        print("Run the pipeline first: python scripts/run_pipeline.py")
-    else:
-        print("Testing DataLoader...")
-        dl = make_dataloader(str(train_csv), batch_size=4, num_workers=0, mode="train")
-        batch_seq, labels, lengths = next(iter(dl))
-        print(f"batch_seq shape: {batch_seq.shape}")  # (B, T_max, F)
-        print(f"labels shape: {labels.shape}")        # (B,)
-        print(f"lengths: {lengths}")                  # (B,)
-        print(f"Sample 0 actual length: {lengths[0]}, padded length: {batch_seq.shape[1]}")
-        print("✓ Dataset is ready for LSTM training")
