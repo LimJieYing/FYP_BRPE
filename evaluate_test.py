@@ -4,6 +4,10 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from pathlib import Path
 import os
 
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 from common_config import COMMON, get_paths
 from pytorch_dataset import make_dataloader
 #from lstm_model_basic import LSTMEstimator
@@ -34,6 +38,9 @@ def main():
     total_mae = 0.0
     n_samples = 0
 
+    all_preds = []
+    all_labels = []
+
     with torch.no_grad():
         for batch_seq, labels, lengths in test_loader:
             batch_seq = batch_seq.to(device)
@@ -41,6 +48,9 @@ def main():
             lengths = lengths.to(device)
 
             preds = model(batch_seq, lengths).squeeze(-1)
+
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
             mse = F.mse_loss(preds, labels, reduction="sum")
             mae = F.l1_loss(preds, labels, reduction="sum")
@@ -57,6 +67,35 @@ def main():
     print(f"Test MAE:  {mae:.6f}")
     print(f"Test RMSE: {rmse:.6f}")
 
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    errors = all_preds - all_labels
 
+    # current visualisations, scatter and histo, TODO: will add more?? 
+    sns.set_theme(style="whitegrid")
+    fig, axes = plt.subplots(1,2 , figsize=(12, 5))
+
+    # lhs: Scatterplot, predicted vs true
+    axes[0].scatter(all_labels, all_preds, alpha=0.5, s=10)
+    axes[0].plot([all_labels.min(), all_labels.max()],
+                     [all_labels.min(), all_labels.max()],
+                     "r--", lw=2, label="Ideal")
+    axes[0].set_xlabel("True RT60")
+    axes[0].set_ylabel("Predicted RT60")
+    axes[0].set_title("Predicted vs True RT60")
+    axes[0].legend()
+
+    # rhs, histogram of errors
+    axes[1].hist(errors, bins=50, edgecolor="black", alpha=0.7)
+    axes[1].axvline(0, color="r", linestyle="--", lw=2)
+    axes[1].set_xlabel("Prediction Error")
+    axes[1].set_ylabel("Frequency")
+    axes[1].set_title("Histogram of Errors")
+
+    plt.tight_layout()
+    plt.savefig("test_results.png")
+    plt.show()
+    print("Saved test_results.png, test results visualization")
+    
 if __name__ == "__main__":
     main()
