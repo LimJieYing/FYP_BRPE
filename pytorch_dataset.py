@@ -21,6 +21,7 @@ class PyTorchDataset(Dataset):
     def __init__(self, split_csv, mode="train"):
         self.mode = mode
         self.df = pd.read_csv(split_csv)
+        self.segment_frames = int(COMMON.get("SEGMENT_FRAMES", 0))
 
         root = Path(__file__).parents[1]
         if mode == "test":
@@ -69,6 +70,17 @@ class PyTorchDataset(Dataset):
         feat = np.load(str(feat_path))
         if feat.ndim != 2:
             raise RuntimeError(f"Expected 2D array (n_mels, n_frames), got shape {feat.shape} for {feat_path}")
+
+        # segment/crop in time axis (frames)
+        # train: random crop; val/eval/test: center crop
+        T = feat.shape[1]
+        seg = self.segment_frames
+        if seg > 0 and T > seg:
+            if self.mode == "train":
+                start = np.random.randint(0, T - seg + 1)
+            else:
+                start = (T - seg) // 2
+            feat = feat[:, start:start + seg]
         
         # normalize per mel band
         feat = (feat - self.mean) / (self.std + 1e-12)
