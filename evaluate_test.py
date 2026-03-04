@@ -26,7 +26,7 @@ def main():
     test_loader = make_dataloader(test_csv, batch_size=batch_size, shuffle=False, num_workers=num_workers, mode="eval")
 
     n_mels = int(COMMON["N_MELS"])
-    model = LSTMEstimator(n_mels=n_mels, hidden_size=256, num_layers=2, bidirectional=True, dropout=0.2).to(device)
+    model = LSTMEstimator(n_mels=n_mels, hidden_size=512, num_layers=3, bidirectional=True, dropout=0.2).to(device)
 
     ckpt_path = ROOT / "best_lstm_model.pth"
     if not ckpt_path.exists():
