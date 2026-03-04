@@ -68,16 +68,16 @@ def main():
 
     batch_size = 32
     num_workers = 4
-    epochs = 3 # CURRENTLY set to 3 for testing THE PLOT, og val = 25
+    epochs = 25
     lr = 5e-4
-    weight_decay = 1e-4
+    weight_decay = 1.5e-4
     grad_clip = 1.0
 
     train_loader = make_dataloader(train_csv, batch_size=batch_size, shuffle=True, num_workers=num_workers, mode="train")
     val_loader = make_dataloader(val_csv, batch_size=batch_size, shuffle=False, num_workers=num_workers, mode="val")
 
     n_mels = int(COMMON["N_MELS"])
-    model = LSTMEstimator(n_mels=n_mels, hidden_size=256, num_layers=2, bidirectional=True, dropout=0.2).to(device)
+    model = LSTMEstimator(n_mels=n_mels, hidden_size=512, num_layers=3, bidirectional=True, dropout=0.2).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
