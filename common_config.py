@@ -6,25 +6,25 @@ ROOT = Path(__file__).parents[1]
 COMMON = {
     # shared params
     "RIR_DIR": "data/rir",
-    "NUM_RIRS": 1200,
+    "NUM_RIRS": 1500,
     "FS": 16000,
     "MIN_RT60": 0.2,
     "MAX_RT60": 1.2,
     "MIN_DIM": [3.0, 3.0, 2.8],
     "MAX_DIM": [8.0, 6.0, 3.5],
     "MAX_ORDER": 12,
-    "SEED": 1234,
+    "SEED": 4323,
     "ADD_NOISE": False,
     "SNR_MIN": 10.0,
     "SNR_MAX": 20.0,
-    "MAX_FILES": 10000,
+    "MAX_FILES": 16000,
     "SR": 16000,
     "N_FFT": 1024,
     "HOP": 256,
     "N_MELS": 80,
     "LOG_OFFSET": 1e-6,
     "SPLIT_RATIOS": [0.85, 0.15, 0.0],
-    "SEGMENT_FRAMES": 600,
+    "SEGMENT_FRAMES": 300, # with 300, i got RMSE0.109445 # 200, valloss=0.0071 RMSE: 0.112559 # 400, val_loss=0.0062, RMSE: 0.110822
 }
 
 DATASETS = {
