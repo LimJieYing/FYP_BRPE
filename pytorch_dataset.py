@@ -22,6 +22,7 @@ class PyTorchDataset(Dataset):
         self.mode = mode
         self.df = pd.read_csv(split_csv)
         self.segment_frames = int(COMMON.get("SEGMENT_FRAMES", 0))
+        self.use_decay_rate = bool(COMMON.get("USE_DECAY_RATE", False))
 
         root = Path(__file__).parents[1]
         if mode == "test":
@@ -59,20 +60,43 @@ class PyTorchDataset(Dataset):
             )
         return (self.feature_dir / rel).with_suffix(".npy")
 
+    def _estimate_decay_rate(self, feat_raw: np.ndarray) -> float:
+        """
+        feat_raw: (n_mels, T) log-mel (pre-normalization)
+        Returns normalized decay scalar in [0, 1].
+        """
+        # proxy energy curve over time
+        e = feat_raw.mean(axis=0).astype(np.float32)  # (T,)
+        if e.shape[0] < 12:
+            return 0.5
+
+        peak = int(np.argmax(e))
+        tail = e[peak:]
+        if tail.shape[0] < 10:
+            return 0.5
+
+        x = np.arange(tail.shape[0], dtype=np.float32)
+        # linear slope of decay tail (usually negative)
+        slope = np.polyfit(x, tail, 1)[0]
+
+        # clip + normalize to [0,1]
+        # tune range if needed
+        slope = float(np.clip(slope, -0.05, 0.0))
+        slope_norm = (slope + 0.05) / 0.05
+        return float(slope_norm)
+
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         feat_path = self._map_out_to_feature(row["out"])
-        
-        # load feature: shape (n_mels, n_frames)
-        feat = np.load(str(feat_path))
+
+        feat = np.load(str(feat_path)).astype(np.float32)  # (n_mels, T)
         if feat.ndim != 2:
             raise RuntimeError(f"Expected 2D array (n_mels, n_frames), got shape {feat.shape} for {feat_path}")
 
-        # segment/crop in time axis (frames)
-        # train: random crop; val/eval/test: center crop
+        # segment/crop
         T = feat.shape[1]
         seg = self.segment_frames
         if seg > 0 and T > seg:
@@ -81,16 +105,20 @@ class PyTorchDataset(Dataset):
             else:
                 start = (T - seg) // 2
             feat = feat[:, start:start + seg]
-        
-        # normalize per mel band
+
+        feat_raw = feat.copy()  # keep pre-normalized for decay feature
+
+        # normalize log-mel channels
         feat = (feat - self.mean) / (self.std + 1e-12)
-        
-        # transpose to (T, F) for LSTM: (n_frames, n_mels)
-        seq = torch.from_numpy(feat.T).float()
-        
-        # label: RT60 (scalar)
+
+        # append decay-rate channel
+        if self.use_decay_rate:
+            decay = self._estimate_decay_rate(feat_raw)
+            decay_ch = np.full((1, feat.shape[1]), decay, dtype=np.float32)
+            feat = np.vstack([feat, decay_ch])  # (n_mels+1, T)
+
+        seq = torch.from_numpy(feat.T).float()  # (T, F)
         label = torch.tensor(float(row["rt60"]), dtype=torch.float32)
-        
         return seq, label
 
 
