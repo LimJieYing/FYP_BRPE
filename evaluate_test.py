@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -25,8 +26,17 @@ def main():
 
     test_loader = make_dataloader(test_csv, batch_size=batch_size, shuffle=False, num_workers=num_workers, mode="eval")
 
-    n_mels = int(COMMON["N_MELS"])
-    model = LSTMEstimator(n_mels=n_mels, hidden_size=512, num_layers=3, bidirectional=True, dropout=0.2).to(device)
+    # input feature dim dynamically
+    sample_seq, _ = test_loader.dataset[0]
+    n_mels = sample_seq.shape[1]
+
+    model = LSTMEstimator(
+        n_mels=n_mels,
+        hidden_size=512,
+        num_layers=3,
+        bidirectional=True,
+        dropout=0.2
+    ).to(device)
 
     ckpt_path = ROOT / "best_lstm_model.pth"
     if not ckpt_path.exists():
@@ -73,7 +83,7 @@ def main():
 
     # current visualisations, scatter and histo, TODO: will add more?? 
     sns.set_theme(style="whitegrid")
-    fig, axes = plt.subplots(1,2 , figsize=(12, 5))
+    fig, axes = plt.subplots(1,3 , figsize=(12, 5))
 
     # lhs: Scatterplot, predicted vs true
     axes[0].scatter(all_labels, all_preds, alpha=0.5, s=10)
@@ -85,12 +95,34 @@ def main():
     axes[0].set_title("Predicted vs True RT60")
     axes[0].legend()
 
-    # rhs, histogram of errors
+    # mid, histogram of errors
     axes[1].hist(errors, bins=50, edgecolor="black", alpha=0.7)
     axes[1].axvline(0, color="r", linestyle="--", lw=2)
     axes[1].set_xlabel("Prediction Error")
     axes[1].set_ylabel("Frequency")
     axes[1].set_title("Histogram of Errors")
+    
+	# rhs, violin plot 
+    bin_edges = np.linspace(all_labels.min(), all_labels.max(), 6)  # 5 bins
+    bin_labels = [f"{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}" for i in range(len(bin_edges)-1)]
+    bin_idx = np.digitize(all_labels, bin_edges[1:-1], right=False)
+    plot_df = pd.DataFrame({
+        "RT60 Bin": [bin_labels[i] for i in bin_idx],
+        "Error": errors
+    })
+
+    sns.violinplot(
+        data=plot_df,
+        x="RT60 Bin",
+        y="Error",
+        inner="quartile",
+        cut=0,
+        ax=axes[2]
+    )
+    axes[2].axhline(0, color="r", linestyle="--", lw=2)
+    axes[2].set_title("Error Distribution by RT60 Bin")
+    axes[2].tick_params(axis="x", rotation=30)
+    
 
     plt.tight_layout()
     plt.savefig("test_results.png")
