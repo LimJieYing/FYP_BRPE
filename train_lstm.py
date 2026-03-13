@@ -13,7 +13,7 @@ from pytorch_dataset import make_dataloader
 #from lstm_model_basic import LSTMEstimator
 from lstm_attention_model import LSTMEstimator
 
-criterion = nn.SmoothL1Loss()
+
 
 def train_one_epoch(model, loader, optimizer, device, task="regression", grad_clip=1.0):
     model.train()
@@ -23,14 +23,11 @@ def train_one_epoch(model, loader, optimizer, device, task="regression", grad_cl
         x, lengths, y = x.to(device), lengths.to(device), y.to(device)
 
         optimizer.zero_grad()
-        preds = model(x, lengths)
-
-        if task == "regression":
-            preds = preds.squeeze(-1)
-            loss = criterion(preds, y)
-        else:
-            loss = F.cross_entropy(preds, y)
-
+        preds = model(x, lengths).squeeze(-1)
+        #weights = 1.0 + 2.0 * (y > 1.0).float() # test, double weight for rt60 > 1s
+        weights = 1.0 + 3.0 * (y - 1.0).clamp(min=0)
+        loss = ((weights * (preds - y) ** 2).mean())
+        
         loss.backward()
         if grad_clip is not None:
             torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -46,16 +43,14 @@ def evaluate(model, loader, device, task="regression"):
     for batch in loader:
         x, y, lengths = batch
         x, lengths, y = x.to(device), lengths.to(device), y.to(device)
-        preds = model(x, lengths)
-
-        if task == "regression":
-            preds = preds.squeeze(-1)
-            loss = criterion(preds, y)
-        else:
-            loss = F.cross_entropy(preds, y)
-
+        preds = model(x, lengths).squeeze(-1)
+        #weights = 1.0 + 2.0 * (y > 1.0).float()
+        weights = 1.0 + 3.0 * (y - 1.0).clamp(min=0)
+        loss = ((weights * (preds - y) ** 2).mean())
+        
         total_loss += loss.item() * x.size(0)
     return total_loss / len(loader.dataset)
+
 
 
 def main():
@@ -68,7 +63,7 @@ def main():
 
     batch_size = 32
     num_workers = 4
-    epochs = 25
+    epochs = 20
     lr = 5e-4
     weight_decay = 1.5e-4
     grad_clip = 1.0
@@ -76,8 +71,17 @@ def main():
     train_loader = make_dataloader(train_csv, batch_size=batch_size, shuffle=True, num_workers=num_workers, mode="train")
     val_loader = make_dataloader(val_csv, batch_size=batch_size, shuffle=False, num_workers=num_workers, mode="val")
 
-    n_mels = int(COMMON["N_MELS"])
-    model = LSTMEstimator(n_mels=n_mels, hidden_size=512, num_layers=3, bidirectional=True, dropout=0.2).to(device)
+    # infer input feature dim dynamically
+    sample_seq, _ = train_loader.dataset[0]
+    n_mels = sample_seq.shape[1]
+
+    model = LSTMEstimator(
+        n_mels=n_mels,
+        hidden_size=512,
+        num_layers=3,
+        bidirectional=True,
+        dropout=0.2
+    ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
