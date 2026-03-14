@@ -24,7 +24,8 @@ COMMON = {
     "N_MELS": 80,
     "LOG_OFFSET": 1e-6,
     "SPLIT_RATIOS": [0.85, 0.15, 0.0],
-    "SEGMENT_FRAMES": 300, # with 300, i got RMSE0.109445 # 200, valloss=0.0071 RMSE: 0.112559 # 400, val_loss=0.0062, RMSE: 0.110822
+    "SEGMENT_FRAMES": 300,
+    "USE_DECAY_RATE": True,   #append decay-rate 
 }
 
 DATASETS = {
