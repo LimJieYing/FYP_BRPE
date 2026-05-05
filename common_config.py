@@ -12,19 +12,16 @@ COMMON = {
     "MAX_RT60": 1.2,
     "MIN_DIM": [3.0, 3.0, 2.8],
     "MAX_DIM": [8.0, 6.0, 3.5],
-    "MAX_ORDER": 12,
+    "MAX_ORDER": 60, # allow more reflections maybe can help with underestimation at RT60s > 0.8
     "SEED": 4323,
-    "ADD_NOISE": False,
-    "SNR_MIN": 10.0,
-    "SNR_MAX": 20.0,
-    "MAX_FILES": 16000,
+    "MAX_FILES": 8000,
     "SR": 16000,
     "N_FFT": 1024,
     "HOP": 256,
     "N_MELS": 80,
     "LOG_OFFSET": 1e-6,
-    "SPLIT_RATIOS": [0.85, 0.15, 0.0],
-    "SEGMENT_FRAMES": 300,
+    "SPLIT_RATIOS": [0.85, 0.15], # [train%, val%] 
+    "SEGMENT_FRAMES": 500,
     "USE_DECAY_RATE": True,   #append decay-rate 
 }
 
