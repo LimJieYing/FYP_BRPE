@@ -18,8 +18,9 @@ from lstm_attention_model import LSTMEstimator
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+	# Load test data
     ROOT = Path(__file__).parents[1]
-    paths = get_paths(os.getenv("MODE", "eval"))
+    paths = get_paths("eval")
     test_csv = str(ROOT / paths["SPLIT_DIR"] / "test.csv")
     batch_size = 16
     num_workers = 4
@@ -30,9 +31,10 @@ def main():
     sample_seq, _ = test_loader.dataset[0]
     n_mels = sample_seq.shape[1]
 
+	# model setup
     model = LSTMEstimator(
         n_mels=n_mels,
-        hidden_size=512,
+        hidden_size=256,
         num_layers=3,
         bidirectional=True,
         dropout=0.2
@@ -51,6 +53,9 @@ def main():
     all_preds = []
     all_labels = []
 
+	# eval loop
+    # we compute MSE and MAE for the entire test set
+	#  store all predictions and labels for further analysis and visualization.
     with torch.no_grad():
         for batch_seq, labels, lengths in test_loader:
             batch_seq = batch_seq.to(device)
@@ -76,6 +81,8 @@ def main():
     print(f"Test MSE:  {mse:.6f}")
     print(f"Test MAE:  {mae:.6f}")
     print(f"Test RMSE: {rmse:.6f}")
+    pearson_r = np.corrcoef(all_labels, all_preds)[0, 1]
+    print(f"Pearson correlation (r): {pearson_r:.4f}")
 
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
@@ -129,5 +136,112 @@ def main():
     plt.show()
     print("Saved test_results.png, test results visualization")
     
+    # Identify and print outliers
+    abs_errors = np.abs(errors)
+    sorted_indices = np.argsort(abs_errors)[::-1]  # descending order
+    
+    
+    print("top 10 outliers (largest prediction errors):")
+   
+    for rank, idx in enumerate(sorted_indices[:10], start=1):
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            speech_path = row.get("speech", "N/A")
+            reverb_out_path = row.get("out", "N/A")
+            rir_path = row.get("rir", "N/A")
+            true_rt60 = all_labels[idx]
+            pred_rt60 = all_preds[idx]
+            error = errors[idx]
+            print(f"\n{rank}. Speech: {speech_path}")
+            print(f"   RIR: {rir_path}")
+            print(f"   Reverb Output: {reverb_out_path}")
+            print(f"   True RT60: {true_rt60:.4f}, Pred RT60: {pred_rt60:.4f}, Error: {error:.4f}")
+    print("="*80 + "\n")
+    
+    print("top 10 best performing (smallest prediction errors):")
+    
+    for rank, idx in enumerate(sorted_indices[-10:][::-1], start=1):
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            speech_path = row.get("speech", "N/A")
+            reverb_out_path = row.get("out", "N/A")
+            rir_path = row.get("rir", "N/A")
+            true_rt60 = all_labels[idx]
+            pred_rt60 = all_preds[idx]
+            error = errors[idx]
+            print(f"\n{rank}. Speech: {speech_path}")
+            print(f"   RIR: {rir_path}")
+            print(f"   Reverb Output: {reverb_out_path}")
+            print(f"   True RT60: {true_rt60:.4f}, Pred RT60: {pred_rt60:.4f}, Error: {error:.4f}")
+
+    print("\n" + "="*80)
+    print("OUTLIER PATTERN ANALYSIS:")
+    print("="*80)
+    
+    outlier_indices = sorted_indices[:10]
+    best_indices = sorted_indices[-10:]
+    
+    outlier_rt60s = all_labels[outlier_indices]
+    best_rt60s = all_labels[best_indices]
+    
+    print(f"\nOutlier RT60 range: {outlier_rt60s.min():.4f} - {outlier_rt60s.max():.4f}")
+    print(f"Best performer RT60 range: {best_rt60s.min():.4f} - {best_rt60s.max():.4f}")
+    print(f"Mean outlier RT60: {outlier_rt60s.mean():.4f}")
+    print(f"Mean best RT60: {best_rt60s.mean():.4f}")
+    
+    # Check if room dimensions are available
+    print("\nOutlier room dimensions:")
+    for idx in outlier_indices[:3]:
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            room_dim = row.get("room_dim", "N/A")
+            print(f"  {room_dim}")
+    
+    print("\nBest performer room dimensions:")
+    for idx in best_indices[:3]:
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            room_dim = row.get("room_dim", "N/A")
+            print(f"  {room_dim}")
+    
+    # Check absorption coefficients
+    print("\nOutlier absorption coefficients:")
+    for idx in outlier_indices[:3]:
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            absorption = row.get("absorption_uniform", "N/A")
+            print(f"  {absorption}")
+    
+    print("\nBest performer absorption coefficients:")
+    for idx in best_indices[:3]:
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            absorption = row.get("absorption_uniform", "N/A")
+            print(f"  {absorption}")
+    
+    # Summary stats
+    outlier_absorptions = []
+    best_absorptions = []
+    for idx in outlier_indices:
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            abs_val = row.get("absorption_uniform")
+            if abs_val is not None and abs_val != "N/A":
+                outlier_absorptions.append(abs_val)
+    
+    for idx in best_indices:
+        if idx < len(test_loader.dataset.df):
+            row = test_loader.dataset.df.iloc[idx]
+            abs_val = row.get("absorption_uniform")
+            if abs_val is not None and abs_val != "N/A":
+                best_absorptions.append(abs_val)
+    
+    if outlier_absorptions:
+        print(f"\nMean outlier absorption: {np.mean(outlier_absorptions):.6f}")
+    if best_absorptions:
+        print(f"Mean best performer absorption: {np.mean(best_absorptions):.6f}")
+
+    print("="*80 + "\n")
+
 if __name__ == "__main__":
     main()
