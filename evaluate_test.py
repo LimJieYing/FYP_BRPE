@@ -81,6 +81,8 @@ def main():
     print(f"Test MSE:  {mse:.6f}")
     print(f"Test MAE:  {mae:.6f}")
     print(f"Test RMSE: {rmse:.6f}")
+    
+	# pearson correlation for between predictions and true values
     pearson_r = np.corrcoef(all_labels, all_preds)[0, 1]
     print(f"Pearson correlation (r): {pearson_r:.4f}")
 
@@ -88,7 +90,7 @@ def main():
     all_labels = np.array(all_labels)
     errors = all_preds - all_labels
 
-    # current visualisations, scatter and histo, TODO: will add more?? 
+    # current visualisations, scatter and histo 
     sns.set_theme(style="whitegrid")
     fig, axes = plt.subplots(1,3 , figsize=(12, 5))
 
@@ -178,6 +180,9 @@ def main():
     print("OUTLIER PATTERN ANALYSIS:")
     print("="*80)
     
+	# additional analysis for outliers
+    # we look at the true RT60 values of the outliers and best performers to see if there's a pattern 
+    # together with absorption coefficients and room dimensions if available in the dataset.
     outlier_indices = sorted_indices[:10]
     best_indices = sorted_indices[-10:]
     
@@ -219,7 +224,7 @@ def main():
             absorption = row.get("absorption_uniform", "N/A")
             print(f"  {absorption}")
     
-    # Summary stats
+    #summary stats
     outlier_absorptions = []
     best_absorptions = []
     for idx in outlier_indices:
