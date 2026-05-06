@@ -14,7 +14,7 @@ from pytorch_dataset import make_dataloader
 from lstm_attention_model import LSTMEstimator
 
 
-
+# training loop for one epoch, returns average loss over the epoch
 def train_one_epoch(model, loader, optimizer, device, task="regression", grad_clip=1.0):
     model.train()
     total_loss = 0.0
@@ -24,9 +24,9 @@ def train_one_epoch(model, loader, optimizer, device, task="regression", grad_cl
 
         optimizer.zero_grad()
         preds = model(x, lengths).squeeze(-1)
+        # not used, for experiments 
         #weights = 1.0 + 2.0 * (y > 1.0).float() # test, double weight for rt60 > 1s
-        weights = 1.0 + 3.0 * (y - 1.0).clamp(min=0)
-        loss = ((weights * (preds - y) ** 2).mean())
+        loss = F.mse_loss(preds, y)
         
         loss.backward()
         if grad_clip is not None:
@@ -36,6 +36,7 @@ def train_one_epoch(model, loader, optimizer, device, task="regression", grad_cl
         total_loss += loss.item() * x.size(0)
     return total_loss / len(loader.dataset)
 
+# evaluation loop, returns average loss over the dataset
 @torch.no_grad()
 def evaluate(model, loader, device, task="regression"):
     model.eval()
@@ -45,8 +46,7 @@ def evaluate(model, loader, device, task="regression"):
         x, lengths, y = x.to(device), lengths.to(device), y.to(device)
         preds = model(x, lengths).squeeze(-1)
         #weights = 1.0 + 2.0 * (y > 1.0).float()
-        weights = 1.0 + 3.0 * (y - 1.0).clamp(min=0)
-        loss = ((weights * (preds - y) ** 2).mean())
+        loss = F.mse_loss(preds, y)
         
         total_loss += loss.item() * x.size(0)
     return total_loss / len(loader.dataset)
@@ -75,15 +75,17 @@ def main():
     sample_seq, _ = train_loader.dataset[0]
     n_mels = sample_seq.shape[1]
 
+# same model as lstm
     model = LSTMEstimator(
         n_mels=n_mels,
-        hidden_size=512,
+        hidden_size=256,
         num_layers=3,
         bidirectional=True,
         dropout=0.2
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
+# scheduler that reduces LR by factor of 0.5 if val loss doesn't improve for 3 epochs, with a minimum LR of 1e-6
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6
     )
@@ -92,6 +94,7 @@ def main():
     train_history = [] #store train loss for epochs 
     val_history = [] #store val loss for epochs
 
+#training loop, save best model based on val loss, and plot train/val loss curves at the end
     for epoch in range(1, epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, task="regression", grad_clip=grad_clip)
         train_history.append(train_loss)
@@ -103,7 +106,6 @@ def main():
 
         if val_loss < best_val:
             best_val = val_loss
-            patience = 0
             torch.save(model.state_dict(), "best_lstm_model.pth")
             print(f"Saved best model (val_loss={best_val:.4f})")
         
