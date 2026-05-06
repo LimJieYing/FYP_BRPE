@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 class LSTMEstimator(nn.Module):
-    def __init__(self, n_mels, hidden_size=512, num_layers=3, bidirectional=True, dropout=0.2, out_dim=1):
+    def __init__(self, n_mels, hidden_size=256, num_layers=3, bidirectional=True, dropout=0.2, out_dim=1):
         super().__init__()
         self.lstm = nn.LSTM(
             input_size=n_mels,
@@ -18,18 +18,19 @@ class LSTMEstimator(nn.Module):
         # Attention layer
         self.attn = nn.Sequential(
             nn.Linear(self.lstm_out_dim, self.lstm_out_dim),
-            nn.Tanh(),
+            nn.Tanh(), # tanh function introduce non-linearity  
+            #can help the model learn more complex attention patterns compared to a simple linear layer.
             nn.Linear(self.lstm_out_dim, 1)
         )
 
         # Regression head
         self.head = nn.Sequential(
             nn.Linear(self.lstm_out_dim, self.lstm_out_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.ReLU(), #use ReLu for activation function for faster convergence
             nn.Linear(self.lstm_out_dim // 2, out_dim)
         )
 
+	# x: (B, T, F), lengths: (B,) 
     def forward(self, x, lengths):
         # x: (B, T, F), lengths: (B,)
         lengths_cpu = lengths.cpu()
