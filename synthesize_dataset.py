@@ -7,6 +7,7 @@ import random
 import numpy as np
 import pandas as pd
 import soundfile as sf
+import librosa as lr
 from scipy.signal import fftconvolve
 import os
 from common_config import COMMON, get_paths
@@ -20,9 +21,7 @@ ROOT = Path(__file__).parents[1]
 SPEECH_DIR = ROOT / PATHS["SPEECH_DIR"]
 RIR_DIR = ROOT / COMMON["RIR_DIR"]
 OUT_DIR = ROOT / PATHS["REVERB_DIR"]
-ADD_NOISE = bool(COMMON["ADD_NOISE"])
-SNR_MIN = float(COMMON["SNR_MIN"])
-SNR_MAX = float(COMMON["SNR_MAX"])
+
 MAX_FILES = int(COMMON["MAX_FILES"])
 SEED = COMMON["SEED"]
 
@@ -46,15 +45,9 @@ def build_rir_meta_map(rirs_meta):
     """Map rir filename -> full metadata dict."""
     return {Path(m["wav"]).name: m for m in rirs_meta}
 
-def add_noise_at_snr(signal, snr_db):
-    rms_signal = np.sqrt(np.mean(signal**2) + 1e-12)
-    noise = np.random.randn(signal.shape[0]).astype(np.float32)
-    rms_noise = np.sqrt(np.mean(noise**2) + 1e-12)
-    target_rms_noise = rms_signal / (10 ** (snr_db / 20))
-    scale = target_rms_noise / rms_noise
-    return signal + noise * scale
 
-def convolve_and_save(speech_path: Path, rir_path: Path, out_path: Path, snr=None):
+# convolve a single speech file with a single RIR and save the reverberant output wav
+def convolve_and_save(speech_path: Path, rir_path: Path, out_path: Path):
     x, fs_x = sf.read(str(speech_path))
     h, fs_h = sf.read(str(rir_path))
     if x.ndim > 1:
@@ -65,8 +58,7 @@ def convolve_and_save(speech_path: Path, rir_path: Path, out_path: Path, snr=Non
     # resample RIR to speech fs if needed 
     if fs_x != fs_h:
         try:
-            import librosa
-            h = librosa.resample(h.astype(np.float32), orig_sr=fs_h, target_sr=fs_x)
+            h = lr.resample(h.astype(np.float32), orig_sr=fs_h, target_sr=fs_x)
             fs_h = fs_x
         except Exception as e:
             raise RuntimeError("Sample rate mismatch and librosa not available.") from e
@@ -76,9 +68,6 @@ def convolve_and_save(speech_path: Path, rir_path: Path, out_path: Path, snr=Non
     peak = float(np.max(np.abs(y)) + 1e-12)
     if peak > 0.999:
         y = y * (0.99 / peak)
-
-    if snr is not None:
-        y = add_noise_at_snr(y, snr)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(out_path), y.astype(np.float32), fs_x)
@@ -103,29 +92,43 @@ def main():
     if len(speech_files) == 0:
         raise RuntimeError(f"No FLAC speech files found under {SPEECH_DIR}")
     rows = []
+    
+	# stratified sampling across RT60 range, 
+	# cycle through NUM_BINS bins and sample uniformly within each bin
+    NUM_BINS = 10
+    bin_size = (COMMON["MAX_RT60"] - COMMON["MIN_RT60"]) / NUM_BINS  # 0.1s per bin
+
+    def get_bin(rt60):
+        return min(int((rt60 - COMMON["MIN_RT60"]) / bin_size), NUM_BINS - 1)
+
+    rir_by_bin = [[] for _ in range(NUM_BINS)]
+    for rf in rir_files:
+        rt60_val = rir_map.get(rf.name)
+        if rt60_val is not None:
+            rir_by_bin[get_bin(rt60_val)].append(rf)
+
+	# loop through speech files, assign RIRs across RT60 bins 
     for i, sp in enumerate(speech_files, start=1):
-        rir_choice = random.choice(rir_files)
-        snr = None
-        if ADD_NOISE and (SNR_MIN is not None and SNR_MAX is not None):
-            snr = float(np.random.uniform(SNR_MIN, SNR_MAX))
+        bin_i = i % NUM_BINS
+        rir_choice = random.choice(rir_by_bin[bin_i]) 
         try:
             rel = sp.relative_to(SPEECH_DIR)
         except Exception:
             rel = sp.name
         out_base = (OUT_DIR / rel).with_suffix("")
         out_file = out_base.with_name(out_base.name + "_reverb.wav")
-        convolve_and_save(sp, rir_choice, out_file, snr=snr)
+        convolve_and_save(sp, rir_choice, out_file)
         rir_name = Path(rir_choice).name
         rt60 = rir_map.get(rir_name)
         meta = rir_meta_map.get(rir_name, {})
         if rt60 is None:
             raise RuntimeError(f"RT60 not found for RIR: {rir_name}")
 
+	#record metadata for a sample (paths, RT60, room dims, absorption, etc)
         rows.append({
             "speech": str(sp.resolve()),
             "rir": str(rir_choice.resolve()),
             "out": str(out_file.resolve()),
-            "snr_db": snr,
             "rt60": rt60,
             "room_dim": meta.get("room_dim"),
             "absorption_uniform": meta.get("absorption_uniform"),
