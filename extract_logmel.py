@@ -19,6 +19,8 @@ HOP = int(COMMON["HOP"])
 N_MELS = int(COMMON["N_MELS"])
 LOG_OFFSET = float(COMMON["LOG_OFFSET"])
 
+#log-mel extraction function
+#params taken from common_config, we can use librosa's melspectrogram function
 def compute_log_mel(y, sr, n_fft, hop, n_mels, log_offset):
     S = librosa.feature.melspectrogram(
         y=y,
@@ -39,11 +41,13 @@ def main():
     if len(files) == 0:
         raise RuntimeError(f"No *_reverb.wav files found under {REVERB_DIR}")
     for p in tqdm(files, desc="Extracting features"):
+        #load wav, convert to mono if needed, resample if needed, 
         y, fs = sf.read(str(p))
         if y.ndim > 1:
             y = y.mean(axis=1)
         if fs != SR:
-            y = librosa.resample(y.astype(np.float32), orig_sr=fs, target_sr=SR)
+            y = librosa.resample(y.astype(np.float32), fs, SR)
+        #compute log-mel and save as .npy
         log_mel = compute_log_mel(y, SR, N_FFT, HOP, N_MELS, LOG_OFFSET)
         rel = p.resolve().relative_to(REVERB_DIR).with_suffix("")
         out_path = OUT_DIR / rel
