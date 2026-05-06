@@ -14,7 +14,8 @@ OUT_DIR = ROOT / PATHS["SPLIT_DIR"]
 RATIOS = COMMON["SPLIT_RATIOS"]
 SEED = COMMON["SEED"]
 
-
+# split the synthesized dataset into train/val by RIR (no leakage of same RIR in both sets)
+#random split of RIR ids (filenames) into train/val sets according to specified ratio
 def make_splits(rir_ids, ratios, seed=None):
     if seed is not None:
         random.seed(seed)
@@ -25,9 +26,9 @@ def make_splits(rir_ids, ratios, seed=None):
     n_val = int(ratios[1] * n)
     train = set(ids[:n_train])
     val = set(ids[n_train : n_train + n_val])
-    return {"train": train, "val": val}  # no internal test
+    return {"train": train, "val": val}  #moved eval due to new dataset 
 
-
+# build the train/val/test splits and write out csv files with metadata for each split
 def build_splits(df, splits, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
     for split_name, rset in splits.items():
