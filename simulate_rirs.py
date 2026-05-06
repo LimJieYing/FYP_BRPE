@@ -21,32 +21,32 @@ MAX_DIM = COMMON["MAX_DIM"]
 MAX_ORDER = int(COMMON["MAX_ORDER"])
 SEED = COMMON["SEED"]
 
+# calculate uniform absorption coefficient for given RT60 and room dimensions using Sabine's formula
 def uniform_absorption_for_rt60(rt60, room_dim):
-    """Sabine: RT60 = 0.161 * V / (alpha * S) -> alpha = 0.161 * V / (RT60 * S)."""
+    # Sabine: RT60 = 0.161 * V / (alpha * S) -> alpha = 0.161 * V / (RT60 * S)
     L, W, H = room_dim
     V = L * W * H
     S = 2 * (L * W + L * H + W * H)
     alpha = 0.161 * V / (max(rt60, 0.05) * S)
     return float(np.clip(alpha, 0.001, 0.999))
 
-
-def generate_rir(room_dim, rt60, fs=16000, max_order=12, src_pos=None, mic_pos=None):
+#generate a single RIR with random room dimensions, source/mic positions, and absorption for target RT60
+def generate_rir(room_dim, rt60, fs, max_order):
     
     alpha = uniform_absorption_for_rt60(rt60, room_dim)
     room = pra.ShoeBox(room_dim, fs=fs, max_order=max_order, absorption=alpha)
 
-    if src_pos is None:
-        src_pos = [
-            random.uniform(0.5, room_dim[0] - 0.5),
-            random.uniform(0.5, room_dim[1] - 0.5),
-            random.uniform(0.8, min(2.0, room_dim[2] - 0.2)),
-        ]
-    if mic_pos is None:
-        mic_pos = [
-            random.uniform(0.5, room_dim[0] - 0.5),
-            random.uniform(0.5, room_dim[1] - 0.5),
-            random.uniform(0.8, min(2.0, room_dim[2] - 0.2)),
-        ]
+    src_pos = [
+        random.uniform(0.5, room_dim[0] - 0.5),
+        random.uniform(0.5, room_dim[1] - 0.5),
+        random.uniform(0.8, min(2.0, room_dim[2] - 0.2)),
+    ]
+    
+    mic_pos = [
+        random.uniform(0.5, room_dim[0] - 0.5),
+        random.uniform(0.5, room_dim[1] - 0.5),
+        random.uniform(0.8, min(2.0, room_dim[2] - 0.2)),
+    ]
 
     room.add_source(src_pos)
     mic = np.array(mic_pos).reshape(3, 1)
@@ -70,13 +70,23 @@ def main():
                 float(random.uniform(MIN_DIM[1], MAX_DIM[1])),
                 float(random.uniform(MIN_DIM[2], MAX_DIM[2])),
             ]
-            rt60 = float(random.uniform(MIN_RT60, MAX_RT60))
+            # for stratified sampling across RT60 range
+			# cycle through NUM_BINS bins and sample uniformly within each bin
+            # rt60 = float(random.uniform(MIN_RT60, MAX_RT60))
+            NUM_BINS = 10
+            bin_size = (MAX_RT60 - MIN_RT60) / NUM_BINS
+            bin_idx = i % NUM_BINS  # cycle through bins
+            rt60 = float(random.uniform(
+				MIN_RT60 + bin_idx * bin_size,
+				MIN_RT60 + (bin_idx + 1) * bin_size
+			))
             rir, alpha, src_pos, mic_pos = generate_rir(dims, rt60, fs=FS, max_order=MAX_ORDER)
 
             wav_name = f"rir_{i:05d}.wav"
             wav_path = OUT_DIR / wav_name
             sf.write(str(wav_path), rir, FS)
 
+			# write metadata as JSON lines 
             meta = {
                 "wav": wav_path.name,
                 "rt60": float(rt60),
