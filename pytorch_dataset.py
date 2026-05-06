@@ -1,10 +1,9 @@
-"""PyTorch Dataset/DataLoader for LSTM training.
+"""DataLoader for LSTM training.
 
 Returns variable length full-file sequences  for LSTM training. a tuple (seq, label) where:
   - seq: Tensor shape (T, F) where T = n_frames (varies per file), F = n_mels
   - label: scalar RT60
 
-TODO: complete this, test and refine
 """
 from pathlib import Path
 import json
@@ -16,7 +15,6 @@ from common_config import COMMON, get_paths
 import pandas as pd
 
 class PyTorchDataset(Dataset):
-    """"""
     
     def __init__(self, split_csv, mode="train"):
         self.mode = mode
@@ -46,10 +44,13 @@ class PyTorchDataset(Dataset):
         if not self.stats_json.exists():
             raise FileNotFoundError(f"Stats file not found: {self.stats_json}. Run compute_stats.py first.")
         stats = json.loads(self.stats_json.read_text())
+        
+        #ensure mean/std are (n_mels, 1) during normalisation
         self.mean = np.array(stats["mean"], dtype=np.float32)[:, None]   # (n_mels, 1)
         self.std = np.array(stats["std"], dtype=np.float32)[:, None]
         self.std[self.std == 0.0] = 1.0  # avoid division by zero
-
+    
+	#ensure output path maps to feature path under FEATURE_DIR with .npy extension
     def _map_out_to_feature(self, out_path):
         p = Path(out_path).resolve()
         try:
@@ -60,76 +61,76 @@ class PyTorchDataset(Dataset):
             )
         return (self.feature_dir / rel).with_suffix(".npy")
 
+	# signal decay rate estimation based on energy ratio of tail vs head of the log-mel sequence
     def _estimate_decay_rate(self, feat_raw: np.ndarray) -> float:
-        """
-        feat_raw: (n_mels, T) log-mel (pre-normalization)
-        Returns normalized decay scalar in [0, 1].
-        """
-        # proxy energy curve over time
-        e = feat_raw.mean(axis=0).astype(np.float32)  # (T,)
-        if e.shape[0] < 12:
+       
+        #feat_raw: (n_mels, T) log-mel (pre-normalisation).
+        #returns a scalar in [0, 1] where higher = slower decay = higher RT60.
+    
+        e = feat_raw.mean(axis=0).astype(np.float32)  # mean energy over mel bins -> (T,)
+        if e.shape[0] < 20:
             return 0.5
-
-        peak = int(np.argmax(e))
-        tail = e[peak:]
-        if tail.shape[0] < 10:
-            return 0.5
-
-        x = np.arange(tail.shape[0], dtype=np.float32)
-        # linear slope of decay tail (usually negative)
-        slope = np.polyfit(x, tail, 1)[0]
-
-        # clip + normalize to [0,1]
-        # tune range if needed
-        slope = float(np.clip(slope, -0.05, 0.0))
-        slope_norm = (slope + 0.05) / 0.05
-        return float(slope_norm)
+ 
+        # Split into early (first 60%) and late (last 40%) portions
+        split = int(0.6 * e.shape[0])
+        head_rms = float(np.sqrt(np.mean(e[:split] ** 2) + 1e-9))
+        tail_rms = float(np.sqrt(np.mean(e[split:] ** 2) + 1e-9))
+ 
+        # Ratio: close to 1 = slow decay (high RT60), close to 0 = fast decay
+        ratio = float(np.clip(tail_rms / (head_rms + 1e-9), 0.0, 1.0))
+        return ratio
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        row = self.df.iloc[idx]
+        row       = self.df.iloc[idx]
         feat_path = self._map_out_to_feature(row["out"])
-
+ 
         feat = np.load(str(feat_path)).astype(np.float32)  # (n_mels, T)
         if feat.ndim != 2:
-            raise RuntimeError(f"Expected 2D array (n_mels, n_frames), got shape {feat.shape} for {feat_path}")
-
-        # segment/crop
-        T = feat.shape[1]
+            raise RuntimeError(
+                f"Expected 2D (n_mels, n_frames), got {feat.shape} for {feat_path}"
+            )
+ 
+        T   = feat.shape[1]
         seg = self.segment_frames
-        if seg > 0 and T > seg:
-            if self.mode == "train":
-                start = np.random.randint(0, T - seg + 1)
+ 
+        if seg > 0:
+            if T > seg:
+                # Tail-biased crop: start 40% into the excess
+                start = int(0.4 * (T - seg))
+                feat  = feat[:, start:start + seg]
             else:
-                start = (T - seg) // 2
-            feat = feat[:, start:start + seg]
-
-        feat_raw = feat.copy()  # keep pre-normalized for decay feature
-
-        # normalize log-mel channels
+                # File shorter than segment — zero-pad to fill
+                pad  = np.zeros((feat.shape[0], seg - T), dtype=np.float32)
+                feat = np.concatenate([feat, pad], axis=1)
+        # if seg == 0: use full file as-is
+ 
+        feat_raw = feat.copy()  # pre-normalisation copy for decay feature
+ 
+        # Normalise using training set mean/std
         feat = (feat - self.mean) / (self.std + 1e-12)
-
-        # append decay-rate channel
+ 
+        # Optionally append decay rate as an extra feature channel
         if self.use_decay_rate:
-            decay = self._estimate_decay_rate(feat_raw)
+            decay    = self._estimate_decay_rate(feat_raw)
             decay_ch = np.full((1, feat.shape[1]), decay, dtype=np.float32)
-            feat = np.vstack([feat, decay_ch])  # (n_mels+1, T)
-
-        seq = torch.from_numpy(feat.T).float()  # (T, F)
+            feat     = np.vstack([feat, decay_ch])  # (n_mels+1, T)
+ 
+        seq   = torch.from_numpy(feat.T).float()                        # (T, F)
         label = torch.tensor(float(row["rt60"]), dtype=torch.float32)
         return seq, label
 
-
-def pad_collate(batch):
-    """Collate function that pads variable-length sequences to max length in batch.
+"""Collate function that pads variable-length sequences to max length in batch.
     
     Returns:
         batch_seq: (B, T_max, F) padded sequences
         labels: (B,) RT60 labels
         lengths: (B,) actual lengths before padding (for pack_padded_sequence)
-    """
+"""
+def pad_collate(batch):
+    
     seqs, labels = zip(*batch)
     lengths = [s.shape[0] for s in seqs]
     max_len = max(lengths)
@@ -145,20 +146,18 @@ def pad_collate(batch):
     
     return batch_seq, labels, lengths
 
-
-def make_dataloader(split_csv, batch_size=16, shuffle=True, num_workers=2, mode="train"):
-    """Create DataLoader with padding collate for variable-length sequences.
-    
+"""Create DataLoader 
     Args:
         split_csv: path to train.csv / val.csv / test.csv
         batch_size: number of samples per batch
         shuffle: whether to shuffle (typically True for train, False for val/test)
         num_workers: number of data loading workers
-        mode: "train" / "val" / "test" (for reference, not used in current impl)
     
     Returns:
-        DataLoader yielding (batch_seq, labels, lengths)
+        DataLoader (batch_seq, labels, lengths)
     """
+def make_dataloader(split_csv, batch_size=16, shuffle=True, num_workers=2, mode="train"):
+    
     ds = PyTorchDataset(split_csv=split_csv, mode=mode)
     return DataLoader(
         ds,
