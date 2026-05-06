@@ -1,5 +1,4 @@
-"""Simple orchestrator: runs all pipeline scripts in sequence.
-Edit COMMON_CONFIG here for project-wide paths used by multiple scripts.
+"""Simple orchestrator: runs all data generation scripts in sequence.
 """
 import importlib
 import os
